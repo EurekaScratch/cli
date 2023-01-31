@@ -7,16 +7,12 @@ const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const mergeUtil = require('merge-util');
 const chalk = require('chalk');
+const { mkdirp } = require('mkdirp');
 const inquirer = require('inquirer');
 
-const dependency = {
-    plain: ['clipcc-extension']
-};
-
 const devDependency = {
-    plain: ['mkdirp', 'rimraf'],
-    webpack: ['webpack', 'webpack-cli', 'copy-webpack-plugin', 'zip-webpack-plugin'],
-    typescript: ['typescript', 'ts-loader']
+    webpack: ['webpack', 'webpack-cli', 'url-loader', 'mini-svg-data-uri'],
+    typescript: ['typescript', 'ts-loader', '@turbowarp/types']
 };
 
 const cmdline = {
@@ -28,7 +24,6 @@ const cmdline = {
 
 const scripts = {
     plain: {
-        'build': 'rimraf ./build && mkdirp build && rimraf ./dist && mkdirp dist && node build.js',
         'build:dist': 'NODE_ENV=production npm run build'
     },
     yarn: {
@@ -41,81 +36,64 @@ const scripts = {
         'build:dist': 'NODE_ENV=production pnpm run build'
     },
     webpack: {
-        'build': 'rimraf ./build && mkdirp build && rimraf ./dist && mkdirp dist && webpack --bail'
+        'build': 'webpack --bail'
     }
 };
 
 const copyFormatFiles = {
-    plain: [{ from: '.gitignore_', to: '.gitignore' }, 'locales'],
+    plain: [{ from: '.gitignore_', to: '.gitignore' }],
     javascript: [
         { from: 'cjs.webpack.config.js', to: 'webpack.config.js' },
         { from: 'index.cjs', to: 'index.js' }
     ],
-    javascriptesm: [
-        { from: 'mjs.webpack.config.js', to: 'webpack.config.js' },
-        { from: 'index.mjs', to: 'index.js' }
-    ],
-    typescript: [{ from: 'ts.webpack.config.js', to: 'webpack.config.js' }, 'tsconfig.json', 'index.ts']
+    typescript: [{ from: 'ts.webpack.config.js', to: 'webpack.config.js' }, 'tsconfig.json', 'images.d.ts', 'index.ts']
 };
 
 const copyFiles = {
-    plain: ['assets']
+    plain: ['assets'],
+    typescript: ['typings', 'utils']
 };
 
-function runCmd(str) {
+function runCmd (str) {
     process.stdout.write(chalk.cyan(`$ ${str}\n`));
     const [cmd, ...arg] = str.split(' ').filter(v => v.length);
-    const sp = spawn(cmd, arg, { encoding: 'utf-8', stdio: 'inherit', shell: process.platform === 'win32' });
+    const sp = spawn(cmd, arg, { cwd: globalPath, encoding: 'utf-8', stdio: 'inherit', shell: process.platform === 'win32' });
     return new Promise((resolve, reject) => {
         sp.on('close', code => resolve(code));
     });
 }
 
-function convertAuthor(author) {
+function convertAuthor (author) {
     return author.includes(',') ? author.split(',').map(v => v.trim()) : author;
 }
 
-function createPackage(types, meta, root) {
+function createPackage (types, meta, root) {
     let script = scripts.plain;
     for (const type of types) script = mergeUtil(script, scripts[type]);
     const pkgInfo = {
-        name: 'clipcc-extension-' + meta.id.replace('.', '-'),
-        version: meta.version,
         author: convertAuthor(meta.author),
         scripts: script
     };
-    const info = {
-        id: meta.id,
-        author: pkgInfo.author,
-        version: meta.version,
-        icon: 'assets/icon.png',
-        inset_icon: 'assets/inset_icon.svg',
-        api: 1,
-        optional: false
-    };
     return Promise.all([
         fs.promises.writeFile(path.join(root, 'package.json'), JSON.stringify(pkgInfo, null, 4)),
-        fs.promises.writeFile(path.join(root, 'info.json'), JSON.stringify(info, null, 4))
     ]);
 }
 
-async function installDependency(pkg, types) {
+async function installDependency (pkg, types) {
     const dep = [];
     const dev = [];
     for (const type of types) {
-        if (dependency.hasOwnProperty(type)) dep.push(...dependency[type]);
         if (devDependency.hasOwnProperty(type)) dev.push(...devDependency[type]);
     }
-    return runCmd(util.format(cmdline[pkg][0], dep.join(' ')))
-        .then(_ => runCmd(util.format(cmdline[pkg][1], dev.join(' '))));
+    return runCmd(util.format(cmdline[pkg][1], dev.join(' ')));
 }
 
-function formatString(data, fmt) {
+function formatString (data, fmt) {
     for (const key in fmt) data = data.replace(RegExp(`(?<!%)%\\[${key}\\]`, 'g'), fmt[key]);
     return data;
 }
 
-function copyFileWithFormat(from, to, fmt) {
+function copyFileWithFormat (from, to, fmt) {
     if (fs.statSync(from).isDirectory()) {
         const files = fs.readdirSync(from);
         if (!fs.existsSync(to)) fs.mkdirSync(to);
@@ -131,7 +109,7 @@ function copyFileWithFormat(from, to, fmt) {
     });
 }
 
-function copyFile(from, to) {
+function copyFile (from, to) {
     if (fs.statSync(from).isDirectory()) {
         const files = fs.readdirSync(from);
         if (!fs.existsSync(to)) fs.mkdirSync(to);
@@ -145,11 +123,11 @@ function copyFile(from, to) {
     });
 }
 
-function copyFilesToDir(types, root, fmt) {
+function copyFilesToDir (types, root, fmt) {
     const pr = [];
     for (const type of types) {
         if (copyFiles.hasOwnProperty(type)) {
-            pr.push(copyFiles[type].map(file => typeof (file) === 'string'
+            pr.push(copyFiles[type].map(file => (typeof (file) === 'string'
                 ? copyFile(
                     path.join(path.dirname(__filename), 'template', file),
                     path.join(root, file)
@@ -157,10 +135,10 @@ function copyFilesToDir(types, root, fmt) {
                 : copyFile(
                     path.join(path.dirname(__filename), 'template', file.from),
                     path.join(root, file.to)
-                )));
+                ))));
         }
         if (copyFormatFiles.hasOwnProperty(type)) {
-            pr.push(copyFormatFiles[type].map(file => typeof (file) === 'string'
+            pr.push(copyFormatFiles[type].map(file => (typeof (file) === 'string'
                 ? copyFileWithFormat(
                     path.join(path.dirname(__filename), 'template', file),
                     path.join(root, file), fmt
@@ -168,38 +146,27 @@ function copyFilesToDir(types, root, fmt) {
                 : copyFileWithFormat(
                     path.join(path.dirname(__filename), 'template', file.from),
                     path.join(root, file.to), fmt
-                )));
+                ))));
         }
     }
     return Promise.all(pr);
 }
 
-async function interactive() {
-    console.log(` ____
-/    \\
-|    |
-| |  |     Welcome to use ${chalk.cyan('clipcc-extension-cli')}!
-| |  | |   Version: ${chalk.yellow(require('./package.json').version)}
-\\ \\__/ /
- \\____/\n`);
+async function interactive () {
+    console.log(`
+Welcome to use ${chalk.cyan('dango-extension-cli')}!
+Version: ${chalk.yellow(require('./package.json').version)}
+\n`);
 
     const packageMeta = await inquirer.prompt([{
         type: 'input',
         name: 'id',
         message: 'Extension ID:',
-        validate: v => /^([a-z0-9_]+\.)+[a-z0-9_]+$/.test(v) ? true : 'Unvalid ID.'
+        validate: v => (/^[a-z0-9_]+$/.test(v) ? true : 'Unvalid ID.')
     }, {
         type: 'input',
         name: 'name',
         message: 'Name:'
-    }, {
-        type: 'input',
-        name: 'description',
-        message: 'Description:'
-    }, {
-        type: 'input',
-        name: 'version',
-        message: 'Version:'
     }, {
         type: 'input',
         name: 'author',
@@ -209,7 +176,7 @@ async function interactive() {
         type: 'list',
         name: 'lang',
         message: 'Choose your development language:',
-        choices: ['javascript (commonjs)', 'javascript (esmodule)', 'typescript']
+        choices: ['javascript (commonjs)', 'typescript']
     }, {
         type: 'list',
         name: 'pkg',
@@ -226,19 +193,23 @@ async function interactive() {
         message: 'Use git?'
     }]);
     if (lang === 'javascript (commonjs)') lang = 'javascript';
-    else if (lang === 'javascript (esmodule)') lang = 'javascriptesm';
     if (pkg === 'berry') {
         await runCmd('yarn set version berry');
         await runCmd('yarn set version latest');
     }
-    await createPackage(['plain', pkg, bundler, lang], packageMeta, '.');
-    await copyFilesToDir(['plain', pkg, bundler, lang], '.', { ...packageMeta });
+    globalPath = path.resolve(`./${packageMeta.name}`);
+    mkdirp.sync(`./${packageMeta.name}`);
+    await createPackage(['plain', pkg, bundler, lang], packageMeta, `./${packageMeta.name}`);
+    await copyFilesToDir(['plain', pkg, bundler, lang], `./${packageMeta.name}`, { ...packageMeta });
     if (git) await runCmd('git init');
     await installDependency(pkg, ['plain', pkg, bundler, lang]);
+    console.log(`Done! Project is initialized in ${chalk.gray(`${packageMeta.name}`)} folder.`);
+    console.log(`Please do not load index.js directly. please run ${chalk.gray(`${pkg} run build:dist`)}`);
+    console.log(`and load ${chalk.gray(`dist/extension.js`)}`);
 }
 
 yargs(hideBin(process.argv))
-    .usage('Generate ClipCC extension project.')
+    .usage('Generate Scratch extension project.')
     .options({
         version: {
             alias: 'v',
